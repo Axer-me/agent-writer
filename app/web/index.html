@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Агент-писатель</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <h1>Агент-писатель</h1>
+    <div id="llm-status" class="status">Проверка моделей…</div>
+    <form id="new-book" class="new-book">
+      <input name="title" placeholder="Название книги" required />
+      <button type="submit">Создать</button>
+    </form>
+    <ul id="book-list" class="book-list"></ul>
+  </aside>
+  <main class="main">
+    <p id="empty" class="empty">Создайте или выберите книгу слева.</p>
+    <section id="workspace" class="workspace hidden">
+      <header class="top">
+        <h2 id="book-title"></h2>
+        <span id="meta" class="meta"></span>
+      </header>
+      <nav id="stages" class="stages"></nav>
+      <p id="hints" class="hints hidden"></p>
+      <textarea id="editor" spellcheck="true"></textarea>
+      <div id="overlaps" class="overlaps hidden"></div>
+      <footer class="bar">
+        <textarea id="comment" placeholder="Комментарий к переписи / курс после главы / замечание к фрагменту"></textarea>
+        <div class="actions" id="actions"></div>
+      </footer>
+    </section>
+  </main>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
