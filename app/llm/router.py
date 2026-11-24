@@ -10,6 +10,7 @@ from app.llm.openrouter import OpenRouterProvider, assert_free_model
 TaskKind = Literal[
     "card",
     "bible",
+    "drama",
     "plan",
     "style",
     "chapter",
@@ -22,7 +23,7 @@ TaskKind = Literal[
 PROSE_TASKS: frozenset[str] = frozenset({"chapter", "revise", "anti_llm", "facts"})
 
 
-def complete_for(
+def _complete_unlogged(
     task: TaskKind,
     messages: list[dict[str, str]],
     *,
@@ -38,6 +39,12 @@ def complete_for(
             return gc
         auth_bad = bool(gc.error and ("Ключ авторизации" in gc.error or "401" in gc.error))
         if task == "facts" and auth_bad:
+            return gc
+        from app.config import openrouter_api_key
+
+        if not openrouter_api_key():
+            if gc.censored:
+                gc.error = "GigaChat отказал по своим правилам. Запасного ключа нет, шаг остановлен."
             return gc
         fallback = OpenRouterProvider().complete(
             messages, max_tokens=max_tokens, temperature=temperature
@@ -73,6 +80,36 @@ def complete_for(
             f"OpenRouter: {result.error} | GigaChat: {gc.error or 'нет текста'}"
         )
     return gc
+
+
+def complete_for(
+    task: TaskKind,
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int = 2048,
+    temperature: float = 0.8,
+) -> LLMResult:
+    import time
+
+    from app.pipeline.jobs import Cancelled, check_cancel, note_call
+
+    check_cancel()
+    started = time.perf_counter()
+    try:
+        result = _complete_unlogged(
+            task, messages, max_tokens=max_tokens, temperature=temperature
+        )
+    except Cancelled:
+        raise
+    except Exception as exc:
+        result = LLMResult(
+            text="",
+            provider="",
+            model="",
+            error=f"Запрос к модели не выполнен: {exc.__class__.__name__}: {exc}"[:500],
+        )
+    note_call(task, result, int((time.perf_counter() - started) * 1000))
+    return result
 
 
 def complete_with_continue(

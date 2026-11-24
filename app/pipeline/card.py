@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import re
+
 from app.llm.router import complete_with_continue
-from app.pipeline.prompts import CANON_RULE, HUMAN_PROSE, comment_block, pack
+from app.pipeline.prompts import CANON_RULE, comment_block, pack
 from app.storage.project import BookProject
 
 
 SYSTEM = f"""Ты редактор и постановщик романа. Язык — только русский.
-{HUMAN_PROSE}
+Это карточка замысла, не проза главы. Пиши разделы коротко и по делу.
 {CANON_RULE}
 Верни markdown-карточку произведения, без предисловий.
 Секции:
@@ -46,19 +48,65 @@ def generate_card(book: BookProject, comment: str | None = None) -> str:
     if not result.ok:
         raise RuntimeError(result.error or "Не удалось составить карточку")
     book.write_text("card.md", result.text)
-    _sync_flags(book, result.text)
+    sync_card_flags(book, result.text)
     return result.text
 
 
-def _sync_flags(book: BookProject, text: str) -> None:
-    low = text.lower()
-    is_original = "оригинал" in low and "вселенн" not in low[:400]
-    if "вселенн" in low:
-        is_original = False
-    canon = "au" not in low and "альтернативн" not in low
-    if "канон" in low:
-        canon = True
-    if " au" in f" {low}" or "а.у." in low or "альтарнетив" in low:
-        canon = False
-    adult = any(x in low for x in ("18+", "18 +", "эрот", "жестокость", "nsfw"))
-    book.patch_state(is_original=is_original, canon=canon, adult=adult)
+_HEADING = re.compile(r"(?m)^(#{1,6})\s+(.+)$")
+
+
+def sync_card_flags(book: BookProject, text: str) -> None:
+    book.patch_state(**infer_card_flags(text, book.read_state()))
+
+
+def infer_card_flags(text: str, previous: dict | None = None) -> dict:
+    """Флаги читаются из текста разделов. Слова в заголовках сами по себе не выбор пользователя."""
+    previous = previous or {}
+    universe = _section_body(text, "вселен", "оригинал").lower()
+    canon_body = _section_body(text, "канон", "au").lower()
+    rating = _section_body(text, "рейтинг", "тон").lower()
+
+    if universe.strip():
+        mentions_universe = re.search(r"вселенн", universe) is not None
+        says_original = "оригинал" in universe
+        if mentions_universe and says_original and re.search(r"не\s+вселенн", universe):
+            is_original = True
+        elif mentions_universe:
+            is_original = False
+        else:
+            is_original = says_original or bool(previous.get("is_original", True))
+    else:
+        is_original = bool(previous.get("is_original", True))
+
+    if canon_body.strip():
+        au = re.search(r"(?<![\w-])au(?![\w-])|альтернатив", canon_body) is not None
+        negated_au = re.search(r"не\s+au|без\s+au|не\s+альтернатив", canon_body) is not None
+        if au and not negated_au:
+            canon = False
+        elif "канон" in canon_body or negated_au:
+            canon = True
+        else:
+            canon = bool(previous.get("canon", True))
+    else:
+        canon = bool(previous.get("canon", True))
+
+    if rating.strip():
+        negated = re.search(r"нет\s*18|без\s*18|не\s*18|pg-?\s*13|семейн", rating) is not None
+        explicit = re.search(r"18\s*\+|эрот|nsfw|жестокост", rating) is not None
+        adult = explicit and not negated
+    else:
+        adult = bool(previous.get("adult", False))
+
+    return {"is_original": is_original, "canon": canon, "adult": adult}
+
+
+def _section_body(text: str, *needles: str) -> str:
+    matches = list(_HEADING.finditer(text or ""))
+    chunks: list[str] = []
+    for index, match in enumerate(matches):
+        title = match.group(2).strip().lower()
+        if not any(needle in title for needle in needles):
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        chunks.append(text[match.end() : end])
+    return "\n".join(chunks)

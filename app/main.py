@@ -17,10 +17,13 @@ from app.llm.gigachat import ping_gigachat
 from app.llm.openrouter import list_free_text_models, ping_openrouter
 from app.llm.router import configured_openrouter_ok
 from app.pipeline.bible import generate_bible
-from app.pipeline.card import generate_card
+from app.pipeline.card import generate_card, sync_card_flags
 from app.pipeline.chapter import accept_chapter, generate_chapter, revise_fragment
 from app.pipeline.continuity import missing_character_hints
-from app.pipeline.plan import generate_plan
+from app.pipeline.approvals import stale_after
+from app.pipeline.drama import generate_drama, parse_drama
+from app.pipeline.plan import book_plan_block_reason, chapter_start_block, generate_plan
+from app.pipeline.scale import CHAPTER_CAP, normalize_size
 from app.pipeline.style import ingest_files, ingest_url
 from app.storage.embeddings import selftest as embeddings_selftest
 from app.storage.project import (
@@ -33,6 +36,9 @@ from app.storage.project import (
 
 WEB = Path(__file__).resolve().parent / "web"
 ensure_dirs()
+_CHAPTER_CANCEL: dict[str, threading.Event] = {}
+_CHAPTER_RUNNING: set[str] = set()
+_CHAPTER_LOCK = threading.Lock()
 
 app = FastAPI(title="Агент-писатель", docs_url="/api/docs")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
@@ -40,6 +46,11 @@ app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 class TitleBody(BaseModel):
     title: str = "Новая книга"
+    book_size: str = "medium"
+
+
+class SizeBody(BaseModel):
+    book_size: str = "medium"
 
 
 class GenerateBody(BaseModel):
@@ -65,8 +76,56 @@ class CourseBody(BaseModel):
     note: str = ""
 
 
-class ApproveBody(BaseModel):
-    stage: str
+class PlanChapterBody(BaseModel):
+    number: int
+    title: str = ""
+    tags: str = ""
+    event: str = ""
+    deferral: str = ""
+    reveal: str = ""
+
+
+class PlanSaveBody(BaseModel):
+    chapters: list[PlanChapterBody] = []
+    drama: dict[str, str] | None = None
+    spine: dict[str, str] | None = None
+    world: dict[str, str] | None = None
+
+
+def _mark_stale(book, source: str) -> None:
+    state = book.read_state()
+    stale = stale_after(
+        state.get("stale") or {},
+        source,
+        is_original=bool(state.get("is_original", True)),
+    )
+    book.patch_state(stale=stale)
+
+
+def _same_text(previous: str, incoming: str) -> bool:
+    """Повторная запись того же текста — не правка."""
+    return (previous or "").replace("\r\n", "\n") == (incoming or "").replace("\r\n", "\n")
+
+
+def _plan_same(stored: list, incoming: list) -> bool:
+    def sign(row) -> tuple:
+        data = row if isinstance(row, dict) else row.model_dump()
+        return (
+            int(data.get("number") or 0),
+            data.get("title") or "",
+            data.get("tags") or "",
+            data.get("event") or "",
+            data.get("reveal") or "",
+        )
+
+    return [sign(row) for row in stored] == [sign(row) for row in incoming]
+
+
+def _sheet_same(stored: dict | None, incoming: dict | None, keys: tuple[str, ...]) -> bool:
+    if incoming is None:
+        return True
+    current = stored or {}
+    return all((current.get(key) or "") == (incoming.get(key) or "") for key in keys)
 
 
 def _book(project_id: str):
@@ -86,8 +145,16 @@ def health():
     return {"ok": True}
 
 
+_HEALTH_CACHE: dict[str, Any] = {"at": 0.0, "payload": None}
+
+
 @app.get("/api/health/llm")
 def health_llm():
+    import time
+
+    cached = _HEALTH_CACHE.get("payload")
+    if cached is not None and time.monotonic() - float(_HEALTH_CACHE["at"]) < 600:
+        return cached
     or_err = None
     try:
         configured_openrouter_ok()
@@ -96,7 +163,7 @@ def health_llm():
     or_ping = ping_openrouter()
     gc_ping = ping_gigachat()
     or_limited = bool(or_ping.error and "429" in (or_ping.error or ""))
-    return {
+    payload = {
         "openrouter": {
             "ok": or_ping.ok or or_limited,
             "rate_limited": or_limited,
@@ -112,6 +179,9 @@ def health_llm():
             "sample": (gc_ping.text or gc_ping.extra.get("raw_text") or "")[:80],
         },
     }
+    _HEALTH_CACHE["at"] = time.monotonic()
+    _HEALTH_CACHE["payload"] = payload
+    return payload
 
 
 @app.get("/api/models/openrouter")
@@ -138,13 +208,34 @@ def api_list_projects():
 
 @app.post("/api/projects")
 def api_create(body: TitleBody):
-    book = create_project(body.title)
+    book = create_project(body.title, body.book_size)
+    return book.public_dict()
+
+
+@app.put("/api/projects/{project_id}/size")
+def api_size(project_id: str, body: SizeBody):
+    book = _book(project_id)
+    state = book.read_state()
+    stale = dict(state.get("stale") or {})
+    stale["drama"] = True
+    stale["plan"] = True
+    book.patch_state(book_size=normalize_size(body.book_size), stale=stale)
     return book.public_dict()
 
 
 @app.get("/api/projects/{project_id}")
 def api_get(project_id: str):
     return _book(project_id).public_dict()
+
+
+@app.get("/api/projects/{project_id}/chapters/{number}")
+def api_read_chapter(project_id: str, number: int, draft: bool = False):
+    if not 1 <= number <= CHAPTER_CAP:
+        raise HTTPException(404, "Нет такой главы")
+    book = _book(project_id)
+    row = next((item for item in book.chapter_catalog() if item["number"] == number), None)
+    text = book.read_chapter(number, draft=draft)
+    return {"text": text, "chapter": row}
 
 
 @app.delete("/api/projects/{project_id}")
@@ -158,8 +249,25 @@ def api_save_file(project_id: str, name: str, body: SaveBody):
     if name not in ARTIFACTS:
         raise HTTPException(400, "Неизвестный файл")
     book = _book(project_id)
+    if _same_text(book.read_text(name), body.content):
+        return {"ok": True, "project": book.public_dict()}
     book.write_text(name, body.content)
-    return {"ok": True}
+    if name == "card.md":
+        sync_card_flags(book, body.content)
+        _mark_stale(book, "card")
+    elif name == "bible.md":
+        _mark_stale(book, "bible")
+    elif name == "drama.md":
+        from app.pipeline.plan import _store
+
+        _store(book).save_drama(parse_drama(body.content))
+        _mark_stale(book, "drama")
+    elif name == "plan.md":
+        from app.pipeline.plan import _store, rows_from_plan_text
+
+        _store(book).upsert_plan(rows_from_plan_text(body.content))
+        _mark_stale(book, "plan")
+    return {"ok": True, "project": book.public_dict()}
 
 
 @app.post("/api/projects/{project_id}/generate/{stage}")
@@ -168,6 +276,7 @@ def api_generate(project_id: str, stage: str, body: GenerateBody):
     generators = {
         "card": generate_card,
         "bible": generate_bible,
+        "drama": generate_drama,
         "plan": generate_plan,
     }
     fn = generators.get(stage)
@@ -175,26 +284,55 @@ def api_generate(project_id: str, stage: str, body: GenerateBody):
         raise HTTPException(400, "Этап генерируется иначе (стиль/глава)")
     try:
         text = fn(book, body.comment)
+        if stage == "card":
+            _mark_stale(book, "card")
+        elif stage == "bible":
+            _mark_stale(book, "bible")
+        elif stage == "drama":
+            _mark_stale(book, "drama")
+        elif stage == "plan":
+            _mark_stale(book, "plan")
     except Exception as exc:
         raise HTTPException(502, str(exc)) from exc
     return {"text": text, "project": book.public_dict()}
 
 
-@app.post("/api/projects/{project_id}/approve/{stage}")
-def api_approve(project_id: str, stage: str):
+@app.put("/api/projects/{project_id}/plan")
+def api_save_plan(project_id: str, body: PlanSaveBody):
+    from app.pipeline.plan import _store
+
     book = _book(project_id)
-    state = book.read_state()
-    approved = dict(state.get("approved") or {})
-    if stage not in approved and stage != "style":
-        if stage not in {"card", "bible", "plan", "style"}:
-            raise HTTPException(400, "Неизвестный этап")
-    approved[stage] = True
-    order = ["card", "style", "bible", "plan", "chapter"]
-    nxt = state.get("stage") or "card"
-    if stage in order:
-        idx = order.index(stage)
-        nxt = order[min(idx + 1, len(order) - 1)]
-    book.patch_state(approved=approved, stage=nxt)
+    rows = [item.model_dump() for item in body.chapters]
+    store = _store(book)
+    if body.drama is not None and not _sheet_same(
+        store.drama(),
+        body.drama,
+        ("hero", "want", "belief", "cost", "becomes", "act1", "act2", "act3", "world1", "world2", "world3"),
+    ):
+        from app.pipeline.drama import render_drama
+
+        store.save_drama(body.drama)
+        book.write_text("drama.md", render_drama(body.drama) + "\n")
+        _mark_stale(book, "drama")
+    if body.spine is not None and not _sheet_same(
+        store.spine(),
+        body.spine,
+        ("finale", "act1", "act2", "act3"),
+    ):
+        store.save_spine(body.spine)
+    if body.world is not None and not _sheet_same(
+        store.world(),
+        body.world,
+        ("when_where", "daily", "first_hour", "hidden"),
+    ):
+        store.save_world(body.world)
+    if rows and not _plan_same(store.plan_chapters(), rows):
+        store.upsert_plan(rows)
+        book.patch_state(chapter_count=max(int(row["number"]) for row in rows))
+        _mark_stale(book, "plan")
+        from app.pipeline.continuity import ensure_fresh_arc
+
+        ensure_fresh_arc(book, force=True)
     return book.public_dict()
 
 
@@ -254,12 +392,24 @@ def api_hints(project_id: str):
 @app.post("/api/projects/{project_id}/chapter/generate")
 def api_chapter_generate(project_id: str):
     book = _book(project_id)
+    reason = chapter_start_block(book)
+    if reason:
+        raise HTTPException(400, reason)
+    with _CHAPTER_LOCK:
+        if project_id in _CHAPTER_RUNNING:
+            raise HTTPException(409, "Глава уже пишется. Дождитесь конца или нажмите «Остановить».")
+        _CHAPTER_RUNNING.add(project_id)
     q: queue.Queue = queue.Queue()
+    cancel = threading.Event()
+    _CHAPTER_CANCEL[project_id] = cancel
 
     def on_progress(step: str, data: dict[str, Any]) -> None:
         q.put(("progress", {"step": step, **data}))
 
     def worker() -> None:
+        from app.pipeline.jobs import Cancelled, bind_job, reset_job
+
+        tokens = bind_job(book, cancel)
         try:
             result = generate_chapter(book, on_progress=on_progress)
             text = result.get("text") or ""
@@ -267,13 +417,25 @@ def api_chapter_generate(project_id: str):
             if text.strip():
                 book.write_chapter(number, text, draft=True)
             q.put(("done", result))
+        except Cancelled as exc:
+            q.put(("error", {"error": str(exc)}))
         except Exception as exc:
+            message = str(exc)
+            from app.pipeline.chapter import read_scene_texts
+
+            number = int(book.read_state().get("chapter_number") or 1)
+            if read_scene_texts(book, number):
+                message += " Уже записанные куски сохранятся, следующий запуск продолжит их."
             q.put(
                 (
                     "error",
-                    {"error": str(exc), "trace": traceback.format_exc()[-800]},
+                    {"error": message, "trace": traceback.format_exc()[-800]},
                 )
             )
+        finally:
+            reset_job(tokens)
+            _CHAPTER_CANCEL.pop(project_id, None)
+            _CHAPTER_RUNNING.discard(project_id)
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -285,6 +447,28 @@ def api_chapter_generate(project_id: str):
                 break
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+class CanonBody(BaseModel):
+    content: str = ""
+
+
+@app.put("/api/projects/{project_id}/canon")
+def api_canon(project_id: str, body: CanonBody):
+    from app.pipeline.plan import _store
+
+    book = _book(project_id)
+    _store(book).replace_canon_notes(body.content)
+    return book.public_dict()
+
+
+@app.post("/api/projects/{project_id}/chapter/cancel")
+def api_chapter_cancel(project_id: str):
+    _book(project_id)
+    event = _CHAPTER_CANCEL.get(project_id)
+    if event:
+        event.set()
+    return {"ok": True}
 
 
 @app.post("/api/projects/{project_id}/chapter/revise")

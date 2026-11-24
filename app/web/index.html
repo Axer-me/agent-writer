@@ -4,36 +4,97 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Агент-писатель</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261120b" />
 </head>
 <body>
-  <aside class="sidebar">
-    <h1>Агент-писатель</h1>
+  <aside class="rail">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <h1>Агент-писатель</h1>
+        <p class="brand-note">Комната для одной книги</p>
+      </div>
+    </div>
     <div id="llm-status" class="status">Проверка моделей…</div>
     <form id="new-book" class="new-book">
-      <input name="title" placeholder="Название книги" required />
+      <input name="title" placeholder="Название новой книги" required />
+      <div class="size-pick" role="radiogroup" aria-label="Размер книги">
+        <button type="button" data-size="mini" title="До 25 глав. Точное число выберет сюжет.">Мини</button>
+        <button type="button" data-size="medium" class="on" title="От 25 до 60 глав. Точное число выберет сюжет.">Среднее</button>
+        <button type="button" data-size="large" title="От 60 до 100 глав. Точное число выберет сюжет.">Большое</button>
+      </div>
       <button type="submit">Создать</button>
     </form>
+    <p class="side-label">Книги</p>
     <ul id="book-list" class="book-list"></ul>
   </aside>
-  <main class="main">
-    <p id="empty" class="empty">Создайте или выберите книгу слева.</p>
+  <main class="room">
+    <div id="empty" class="empty">
+      <p class="kicker">Пока пусто</p>
+      <h2>Выберите книгу или начните новую</h2>
+      <p>Описание, развитие сюжета, персонажи и план собираются по шагам. Глава пишется по уже собранному плану.</p>
+    </div>
     <section id="workspace" class="workspace hidden">
       <header class="top">
-        <h2 id="book-title"></h2>
-        <span id="meta" class="meta"></span>
+        <div class="title-block">
+          <h2 id="book-title"></h2>
+          <span id="meta" class="meta"></span>
+          <label class="book-size">
+            Размер
+            <select id="book-size" title="Диапазон глав. Точное число в плане выбирает сюжет.">
+              <option value="mini">Мини · до 25</option>
+              <option value="medium">Среднее · 25–60</option>
+              <option value="large">Большое · 60–100</option>
+            </select>
+          </label>
+        </div>
+        <nav id="stages" class="stages" aria-label="Этапы книги"></nav>
+        <div class="tools">
+          <div class="view-switch" role="tablist" aria-label="Режим книги">
+            <button type="button" id="view-write" title="Писать: описание, план и глава">Писать</button>
+            <button type="button" id="view-read" title="Читать принятые главы по одной">Читать</button>
+            <button type="button" id="view-structure" title="Развитие сюжета и уже написанные главы">Оглавление</button>
+          </div>
+          <div class="themes" role="group" aria-label="Фон страницы">
+            <button type="button" data-theme="light" class="on" title="Светлый фон"></button>
+            <button type="button" data-theme="night" title="Ночной фон"></button>
+          </div>
+        </div>
       </header>
-      <nav id="stages" class="stages"></nav>
-      <p id="hints" class="hints hidden"></p>
-      <textarea id="editor" spellcheck="true"></textarea>
-      <div id="overlaps" class="overlaps hidden"></div>
-      <footer class="bar">
-        <textarea id="comment" placeholder="Комментарий к переписи / курс после главы / замечание к фрагменту"></textarea>
-        <div class="actions" id="actions"></div>
+      <div class="page">
+        <div class="canvas">
+          <p id="hints" class="hints hidden"></p>
+          <article id="accepted-view" class="accepted-view hidden"></article>
+          <div id="plan-board" class="plan-board hidden"></div>
+          <textarea id="editor" spellcheck="true" placeholder="Здесь появится текст этого шага."></textarea>
+          <div id="overlaps" class="overlaps hidden"></div>
+          <div id="library" class="library hidden"></div>
+        </div>
+        <aside id="drawer" class="drawer" aria-hidden="true">
+          <div class="drawer-head">
+            <h3 id="drawer-title"></h3>
+            <button type="button" id="drawer-close" data-keep="1">Закрыть</button>
+          </div>
+          <div id="pane-story" class="drawer-pane hidden">
+            <div id="story-strip" class="story-strip"></div>
+          </div>
+          <div id="pane-note" class="drawer-pane hidden">
+            <label class="panel-label" for="comment">Заметка</label>
+            <textarea id="comment" placeholder="Замечание к переписи или текст, из которого собрать книгу"></textarea>
+          </div>
+          <div id="pane-canon" class="drawer-pane hidden">
+            <label id="canon-label" class="panel-label" for="canon-notes">Заметки о мире</label>
+            <textarea id="canon-notes" class="canon-notes" spellcheck="true" placeholder="Одна строка — один факт. Можно начать с «книги:», «игры:» или «сериал:». Для своей книги это необязательно."></textarea>
+          </div>
+        </aside>
+      </div>
+      <footer id="composer" class="dock-wrap">
+        <p id="run-line" class="run-line hidden" role="status"><span class="run-text current"></span><span class="run-text next"></span></p>
+        <div class="actions dock" id="actions"></div>
       </footer>
     </section>
   </main>
-  <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js"></script>
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="/static/app.js?v=20261124a"></script>
 </body>
 </html>

@@ -19,9 +19,10 @@ ARTIFACTS = (
     "style.md",
     "timeline.md",
     "facts.md",
+    "drama.md",
 )
 
-STAGES = ("card", "style", "bible", "plan", "chapter")
+STAGES = ("card", "style", "drama", "bible", "plan", "chapter")
 
 
 def _now() -> str:
@@ -42,7 +43,9 @@ def default_state(project_id: str, title: str) -> dict[str, Any]:
         "title": title,
         "stage": "card",
         "chapter_number": 1,
-        "approved": {"card": False, "style": False, "bible": False, "plan": False},
+        "approved": {"card": False, "style": False, "drama": False, "bible": False, "plan": False},
+        "stale": {"drama": False, "bible": False, "plan": False},
+        "book_size": "medium",
         "canon": True,
         "is_original": True,
         "adult": True,
@@ -107,6 +110,23 @@ class BookProject:
             return ""
         return path.read_text(encoding="utf-8")
 
+    def contract_path(self, number: int) -> Path:
+        return self.chapters_dir / f"{number:03d}-contract.md"
+
+    def read_contract(self, number: int) -> str:
+        path = self.contract_path(number)
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
+
+    def write_contract(self, number: int, content: str) -> None:
+        self.chapters_dir.mkdir(parents=True, exist_ok=True)
+        path = self.contract_path(number)
+        text = content.replace("\r\n", "\n")
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+
     def write_chapter(self, number: int, content: str, draft: bool = False) -> None:
         self.chapters_dir.mkdir(parents=True, exist_ok=True)
         path = self.chapter_path(number, draft=draft)
@@ -130,14 +150,88 @@ class BookProject:
         out.reverse()
         return out
 
+    def chapter_catalog(self) -> list[dict[str, Any]]:
+        """Строки состава до потолка размера: статус, слова и даты файла. Текста глав здесь нет."""
+        from app.pipeline.plan import _store
+        from app.pipeline.scale import CHAPTER_CAP
+
+        titles = {
+            int(row["number"]): (row.get("title") or "")
+            for row in _store(self).plan_chapters()
+        }
+        current = int(self.read_state().get("chapter_number") or 1)
+        catalog: list[dict[str, Any]] = []
+        for number in range(1, CHAPTER_CAP + 1):
+            accepted = self.read_chapter(number, draft=False).strip()
+            draft = self.read_chapter(number, draft=True).strip()
+            if accepted:
+                status = "accepted"
+                text = accepted
+                path = self.chapter_path(number, draft=False)
+            elif draft:
+                status = "draft"
+                text = draft
+                path = self.chapter_path(number, draft=True)
+            else:
+                status = "empty"
+                text = ""
+                path = None
+            created, updated = _file_times(path)
+            catalog.append(
+                {
+                    "number": number,
+                    "title": titles.get(number, ""),
+                    "status": status,
+                    "words": len(text.split()) if text else 0,
+                    "created_at": created,
+                    "updated_at": updated,
+                    "current": number == current,
+                }
+            )
+        return catalog
+
+    def book_times(self) -> tuple[str, str]:
+        state = self.read_state()
+        folder = self.root.stat()
+        created = state.get("created_at") or _local_stamp(folder.st_ctime)
+        updated = state.get("updated_at") or _local_stamp(folder.st_mtime)
+        return created, updated
+
     def public_dict(self) -> dict[str, Any]:
         state = self.read_state()
+        number = int(state.get("chapter_number") or 1)
+        draft = self.read_chapter(number, draft=True)
+        accepted = self.read_chapter(number - 1, draft=False) if number > 1 else ""
+        created, updated = self.book_times()
         return {
             **state,
+            "created_at": created,
+            "updated_at": updated,
             "files": {name: self.read_text(name) for name in ARTIFACTS},
-            "draft": self.read_chapter(int(state.get("chapter_number") or 1), draft=True),
+            "draft": draft,
+            "accepted_text": accepted,
             "hints": state.get("missing_hints") or [],
+            "chapter_index": self.chapter_catalog(),
+            **_story_snapshot(self),
         }
+
+
+def _file_times(path: Path | None) -> tuple[str, str]:
+    if path is None or not path.exists():
+        return "", ""
+    stamp = path.stat()
+    return _local_stamp(stamp.st_ctime), _local_stamp(stamp.st_mtime)
+
+
+def _local_stamp(timestamp: float) -> str:
+    moment = datetime.fromtimestamp(timestamp, timezone.utc).astimezone()
+    return moment.isoformat(timespec="seconds")
+
+
+def _story_snapshot(book: BookProject) -> dict[str, Any]:
+    from app.pipeline.plan import _store
+
+    return _store(book).snapshot()
 
 
 def list_projects() -> list[dict[str, Any]]:
@@ -148,19 +242,23 @@ def list_projects() -> list[dict[str, Any]]:
             continue
         book = BookProject(path)
         state = book.read_state()
+        created, updated = book.book_times()
         items.append(
             {
                 "id": state.get("id") or path.name,
                 "title": state.get("title") or path.name,
                 "stage": state.get("stage"),
                 "chapter_number": state.get("chapter_number"),
-                "updated_at": state.get("updated_at"),
+                "updated_at": updated,
+                "created_at": created,
             }
         )
     return items
 
 
-def create_project(title: str) -> BookProject:
+def create_project(title: str, book_size: str = "medium") -> BookProject:
+    from app.pipeline.scale import normalize_size
+
     ensure_dirs()
     title = (title or "").strip() or "Новая книга"
     project_id = slugify(title)
@@ -168,7 +266,9 @@ def create_project(title: str) -> BookProject:
     root.mkdir(parents=False)
     (root / "chapters").mkdir()
     book = BookProject(root)
-    book.write_state(default_state(project_id, title))
+    state = default_state(project_id, title)
+    state["book_size"] = normalize_size(book_size)
+    book.write_state(state)
     for name in ARTIFACTS:
         book.write_text(name, "")
     return book

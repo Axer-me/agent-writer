@@ -16,6 +16,22 @@ HEADERS_EXTRA = {
 }
 
 
+def _pause(attempt: int, seconds: float | None = None) -> None:
+    from app.pipeline.jobs import check_cancel
+
+    if attempt >= 3:
+        check_cancel()
+        return
+    delay = 2 ** attempt if seconds is None else seconds
+    deadline = time.monotonic() + delay
+    while True:
+        check_cancel()
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return
+        time.sleep(min(0.4, left))
+
+
 def is_free_model_id(model_id: str) -> bool:
     return bool(model_id) and model_id.strip().endswith(":free")
 
@@ -110,26 +126,26 @@ class OpenRouterProvider:
         }
         last_error = "неизвестная ошибка"
         retries = 0
-        for attempt in range(2):
+        for attempt in range(4):
             try:
                 with httpx.Client(timeout=180.0) as client:
                     response = client.post(OPENROUTER_URL, json=payload, headers=headers)
             except httpx.TimeoutException:
                 last_error = "таймаут OpenRouter"
                 retries += 1
-                time.sleep(2**attempt)
+                _pause(attempt)
                 continue
             except httpx.HTTPError as exc:
                 last_error = f"сеть OpenRouter: {exc}"
                 retries += 1
-                time.sleep(2**attempt)
+                _pause(attempt)
                 continue
 
             if response.status_code == 429:
                 retries += 1
                 wait = float(response.headers.get("Retry-After") or (2**attempt))
                 last_error = f"лимит OpenRouter 429 (подождите {wait:.0f}с; у :free часто ~50 запросов/день)"
-                time.sleep(min(wait, 8))
+                _pause(attempt, min(wait, 8))
                 continue
             if response.status_code == 402:
                 return LLMResult(
@@ -141,9 +157,9 @@ class OpenRouterProvider:
                 )
             if response.status_code >= 400:
                 last_error = f"OpenRouter HTTP {response.status_code}: {response.text[:400]}"
-                if response.status_code >= 500:
+                if response.status_code >= 500 and attempt < 3:
                     retries += 1
-                    time.sleep(2**attempt)
+                    _pause(attempt)
                     continue
                 return LLMResult(
                     text="",

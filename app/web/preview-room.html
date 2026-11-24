@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Макет комнаты</title>
+  <style>
+    :root {
+      --bg: #f6f3ee;
+      --ink: #1a1916;
+      --prose: #2c2924;
+      --muted: #8a8176;
+      --line: #e6e0d6;
+      --orange: #e85d04;
+      --dock: rgba(255, 252, 248, 0.92);
+      --sheet: #fffcf8;
+      --rail: #141311;
+      --rail-ink: #f4efe8;
+      --rail-dim: #9a9186;
+      --rail-card: #1e1c19;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    body.sepia {
+      --bg: #f3e6c8;
+      --ink: #3b2e22;
+      --prose: #433628;
+      --muted: #8d7760;
+      --line: #e2d0b0;
+      --dock: rgba(248, 239, 220, 0.94);
+      --sheet: #f8efdc;
+    }
+    body.night {
+      --bg: #12110f;
+      --ink: #f0ebe3;
+      --prose: #d8d2c8;
+      --muted: #8d8680;
+      --line: #2a2723;
+      --dock: rgba(28, 26, 23, 0.94);
+      --sheet: #1c1a17;
+    }
+    .app { height: 100%; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+    .rail {
+      background:
+        radial-gradient(120% 40% at 0% 0%, rgba(232, 93, 4, 0.16), transparent 46%),
+        var(--rail);
+      color: var(--rail-ink);
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      padding: 26px 18px 20px;
+      min-height: 0;
+      border-right: 1px solid #000;
+    }
+    .logo {
+      margin: 0;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--rail-dim);
+    }
+    .book {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 10px;
+      border-radius: 12px;
+      background: var(--rail-card);
+    }
+    .cover {
+      width: 46px;
+      height: 66px;
+      border-radius: 2px 5px 5px 2px;
+      background:
+        linear-gradient(90deg, rgba(0, 0, 0, 0.35), transparent 22%, transparent 78%, rgba(0, 0, 0, 0.18)),
+        linear-gradient(165deg, #4a3b2c 0%, #2a2118 48%, #1a140f 100%);
+      color: #f3e6d4;
+      display: grid;
+      place-items: center;
+      font-family: Georgia, "Palatino Linotype", serif;
+      font-size: 22px;
+      box-shadow: inset 0 0 0 1px rgba(243, 230, 212, 0.2), 3px 4px 10px rgba(0, 0, 0, 0.35);
+    }
+    .book strong { display: block; font-size: 14px; font-weight: 600; letter-spacing: -0.02em; }
+    .book span { color: var(--rail-dim); font-size: 12px; }
+    .rail p { margin: 0; }
+    .chapters { display: flex; flex-direction: column; gap: 2px; }
+    .chapters button {
+      text-align: left;
+      padding: 8px 10px;
+      border-radius: 8px;
+      color: var(--rail-dim);
+      font-size: 13px;
+    }
+    .chapters button.on { color: var(--rail-ink); background: #2a2622; }
+    .rail-foot {
+      margin-top: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--rail-dim);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .fit button { color: var(--rail-dim); font-size: 12px; letter-spacing: 0; text-transform: none; padding: 4px 2px; }
+    .fit button.on { color: var(--rail-ink); }
+    .fit-back { display: none; color: var(--muted); font-size: 12px; }
+    body.phone .fit-back { display: inline; }
+    @media (max-width: 1180px) {
+      .crumb { display: none; }
+    }
+    .room {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    .top {
+      height: 58px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 22px 0 28px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--bg) 88%, white);
+    }
+    .crumb {
+      flex: 0 1 auto;
+      min-width: 0;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .steps {
+      display: flex;
+      gap: 2px;
+      min-width: 0;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .steps::-webkit-scrollbar { display: none; }
+    .steps button {
+      flex: 0 0 auto;
+      padding: 8px 10px;
+      color: var(--muted);
+      border-radius: 8px;
+      font-size: 13.5px;
+    }
+    .steps button.on {
+      color: var(--ink);
+      background: transparent;
+      box-shadow: inset 0 -2px 0 var(--orange);
+      border-radius: 0;
+    }
+    .tools { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+    .themes { display: flex; gap: 6px; }
+    .themes button {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+    }
+    .themes button[data-theme="white"] { background: #fff; }
+    .themes button[data-theme="sepia"] { background: #f3ead7; }
+    .themes button[data-theme="night"] { background: #161616; }
+    .themes button.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--orange); }
+    .tools .fit { display: none; }
+    .page { flex: 1; min-height: 0; overflow: auto; }
+    .column { max-width: 660px; margin: 0 auto; padding: 64px 36px 140px; }
+    .kicker {
+      margin: 0 0 12px;
+      color: var(--orange);
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    .column h2 {
+      margin: 0 0 28px;
+      font-family: Georgia, "Palatino Linotype", Palatino, serif;
+      font-size: 40px;
+      font-weight: 500;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+    }
+    .column.reading { text-align: center; }
+    .column.reading h2 { margin-bottom: 14px; }
+    .column.reading h2::after {
+      content: "";
+      display: block;
+      width: 36px;
+      height: 2px;
+      margin: 18px auto 0;
+      background: var(--orange);
+    }
+    .meta {
+      margin: 0 0 36px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .prose { text-align: left; }
+    .prose p {
+      margin: 0 0 1.2em;
+      font-family: Georgia, "Palatino Linotype", Palatino, serif;
+      font-size: 19.5px;
+      line-height: 1.8;
+      color: var(--prose);
+    }
+    .column.reading .prose p:first-of-type::first-letter {
+      float: left;
+      margin: 6px 10px 0 0;
+      font-size: 3.35em;
+      line-height: 0.78;
+      color: var(--ink);
+    }
+    .dock {
+      position: absolute;
+      z-index: 3;
+      left: 50%;
+      bottom: 22px;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      max-width: calc(100% - 36px);
+      padding: 5px;
+      background: var(--dock);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      box-shadow: 0 12px 40px rgba(40, 28, 12, 0.12);
+      backdrop-filter: blur(16px);
+    }
+    .dock button {
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .dock button:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); }
+    .dock button.on { color: var(--orange); }
+    .dock .accent {
+      margin-left: 4px;
+      background: var(--orange);
+      color: #fff;
+      font-weight: 650;
+      border-radius: 999px;
+      box-shadow: 0 6px 16px rgba(232, 93, 4, 0.28);
+    }
+    .dock .accent:hover { background: #cf5203; color: #fff; }
+    .drawer {
+      position: absolute;
+      z-index: 2;
+      top: 58px;
+      right: 0;
+      bottom: 0;
+      width: min(380px, 100%);
+      padding: 28px 26px 110px;
+      background: var(--sheet);
+      color: var(--ink);
+      border-left: 1px solid var(--line);
+      box-shadow: -16px 0 40px rgba(0, 0, 0, 0.06);
+      transform: translateX(105%);
+      transition: transform 260ms ease;
+    }
+    .drawer.open { transform: translateX(0); }
+    .room:has(.drawer.open) .page { margin-right: 380px; }
+    .drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .drawer h3 { margin: 0; font-size: 18px; letter-spacing: -0.02em; }
+    .drawer-head button { color: var(--muted); }
+    .drawer p { margin: 0 0 14px; font-size: 15px; line-height: 1.65; }
+    .drawer textarea {
+      width: 100%;
+      min-height: 180px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: transparent;
+      color: inherit;
+      padding: 12px 14px;
+      font: inherit;
+      line-height: 1.5;
+    }
+    body.phone .app { grid-template-columns: minmax(0, 1fr); }
+    body.phone .rail { display: none; }
+    body.phone .top { height: auto; flex-wrap: wrap; gap: 8px 12px; padding: 12px 16px 8px; }
+    body.phone .steps { order: 3; width: 100%; }
+    body.phone .column { padding: 32px 22px 128px; }
+    body.phone .column h2 { font-size: 30px; }
+    body.phone .prose p { font-size: 18px; }
+    body.phone .dock {
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      transform: none;
+      width: auto;
+      max-width: none;
+      flex-wrap: wrap;
+      justify-content: center;
+      border-radius: 18px;
+    }
+    body.phone .dock .accent { order: -1; flex: 1 0 100%; margin: 0 0 2px; }
+    body.phone .drawer { top: 108px; }
+    body.phone .room:has(.drawer.open) .page { margin-right: 0; }
+    @media (max-width: 860px) {
+      .app { grid-template-columns: minmax(0, 1fr); }
+      .rail { display: none; }
+      .top { height: auto; flex-wrap: wrap; padding: 12px 16px 8px; }
+      .column { padding: 28px 20px 108px; }
+      .prose p { font-size: 18px; }
+      .drawer { top: 108px; }
+      .room:has(.drawer.open) .page { margin-right: 0; }
+      .dock { left: 12px; right: 12px; transform: none; width: auto; flex-wrap: wrap; justify-content: center; border-radius: 18px; }
+      .dock .accent { order: -1; flex: 1 0 100%; margin: 0 0 2px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <p class="logo">Агент-писатель</p>
+      <div class="book">
+        <div class="cover" aria-hidden="true">Х</div>
+        <div>
+          <strong>Ходячие мертвецы</strong>
+          <span>Глава 1 · 293 слова</span>
+        </div>
+      </div>
+      <nav class="chapters" aria-label="Написанные главы">
+        <button type="button" class="on">1. Возвращение домой</button>
+      </nav>
+      <div class="rail-foot">
+        <span>Черновик</span>
+        <div class="fit">
+          <button type="button" id="wide" class="on">Широкий</button>
+          <button type="button" id="phone">Телефон</button>
+        </div>
+      </div>
+    </aside>
+    <section class="room">
+      <header class="top">
+        <div class="crumb" id="kicker">Ходячие мертвецы</div>
+        <nav class="steps" id="steps" aria-label="Этапы"></nav>
+        <div class="tools">
+          <div class="themes" role="group" aria-label="Фон текста">
+            <button type="button" data-theme="white" class="on" title="Белый"></button>
+            <button type="button" data-theme="sepia" title="Сепия"></button>
+            <button type="button" data-theme="night" title="Ночь"></button>
+          </div>
+          <button type="button" class="fit-back" id="unphone">Широкий</button>
+        </div>
+      </header>
+      <div class="page">
+        <div class="column">
+          <p class="kicker" id="eyebrow">Глава 1</p>
+          <h2 id="heading">Возвращение домой</h2>
+          <p class="meta" id="meta" hidden>293 слова</p>
+          <div class="prose" id="page"></div>
+        </div>
+      </div>
+      <aside class="drawer" id="drawer" aria-hidden="true">
+        <div class="drawer-head">
+          <h3 id="drawer-title"></h3>
+          <button type="button" id="drawer-close">Закрыть</button>
+        </div>
+        <div id="drawer-body"></div>
+      </aside>
+      <footer class="dock" id="dock"></footer>
+    </section>
+  </div>
+  <script>
+    var pages = {
+      card: ["Описание", "Замысел", "Полковник против нежити.\n\nОригинальная книга: ужас, постапокалипсис, третье лицо. Герой возвращается в родное поместье и застаёт деревню, которую уже не узнать."],
+      style: ["Стиль", "Манера", "Короткая фраза. Предмет называется прямо.\n\nВнутреннее состояние видно по тому, что человек делает руками, а не по объяснению."],
+      drama: ["Развитие", "Волынцев", "Хочет удержать дом и назвать живых по именам.\n\nВерит, что порядок ещё можно восстановить, если не поднимать шума."],
+      people: ["Персонажи", "Волынцев", "Высокий, худощавый, лет сорока.\n\nВ сцене его узнать по тому, что он не зажигает свет и не повышает голос."],
+      plan: ["План", "Три первых хода", "Вечером Волынцев входит в поместье и узнаёт, что деревня уже не его.\n\nОн остаётся у порога. За спиной появляются ещё фигуры.\n\nУтром он называет тех, кого узнал. Список короче, чем дом помнит."],
+      chapter: ["Глава 1", "Возвращение домой", "Комната пахла сыростью и старым деревом. За окном шумел осенний ветер, раскачивая ветви деревьев. Полковник Алексей Андреевич Волынцев стоял неподвижно, глядя на знакомое пространство.\n\nОн не зажигал свет. В дверях уже кто-то стоял, и этого было довольно, чтобы не делать лишнего шага."]
+    };
+    var order = ["card", "style", "drama", "people", "plan", "chapter"];
+    var names = { card: "Описание", style: "Стиль", drama: "Развитие", people: "Персонажи", plan: "План", chapter: "Глава" };
+    var actions = { card: "Переписать описание", style: "Переписать стиль", drama: "Переписать развитие", people: "Переписать персонажей", plan: "Переписать план", chapter: "Писать главу" };
+    var stage = "chapter";
+    var sheet = "";
+    function paragraphs(text) {
+      var box = document.getElementById("page");
+      box.innerHTML = "";
+      text.split(/\n\n+/).forEach(function (part) {
+        var p = document.createElement("p");
+        p.textContent = part.replace(/\n/g, " ");
+        box.appendChild(p);
+      });
+    }
+    function render() {
+      var page = pages[stage];
+      var reading = stage === "chapter";
+      document.querySelector(".column").classList.toggle("reading", reading);
+      document.getElementById("eyebrow").textContent = page[0];
+      document.getElementById("heading").textContent = page[1];
+      document.getElementById("kicker").textContent = "Ходячие мертвецы";
+      var meta = document.getElementById("meta");
+      meta.hidden = !reading;
+      meta.textContent = "293 слова · Среднее";
+      paragraphs(page[2]);
+      var steps = document.getElementById("steps");
+      steps.innerHTML = "";
+      order.forEach(function (id) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.textContent = names[id];
+        if (id === stage) b.className = "on";
+        b.onclick = function () { stage = id; sheet = ""; render(); };
+        steps.appendChild(b);
+      });
+      var current = steps.querySelector(".on");
+      if (current) current.scrollIntoView({ inline: "nearest", block: "nearest" });
+      var dock = document.getElementById("dock");
+      dock.innerHTML = "";
+      function add(label, cls, fn) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        if (cls) b.className = cls;
+        b.onclick = fn;
+        dock.appendChild(b);
+      }
+      if (stage === "chapter" || stage === "plan") add("Ближайшие главы", sheet === "arc" ? "on" : "", function () { sheet = sheet === "arc" ? "" : "arc"; render(); });
+      add("Заметка", sheet === "note" ? "on" : "", function () { sheet = sheet === "note" ? "" : "note"; render(); });
+      add("Собрать по заметке", "", function () {});
+      add("Сохранить", "", function () {});
+      if (stage === "chapter") add("Принять главу", "", function () {});
+      add(actions[stage], "accent", function () {});
+      var drawer = document.getElementById("drawer");
+      drawer.classList.toggle("open", sheet !== "");
+      drawer.setAttribute("aria-hidden", sheet ? "false" : "true");
+      var title = document.getElementById("drawer-title");
+      var body = document.getElementById("drawer-body");
+      if (sheet === "arc") {
+        title.textContent = "Ближайшие главы";
+        body.innerHTML = "<p>О планах действий пока рано. Это обещание не раскрывается раньше главы 5.</p><p>Эта глава. Возвращение домой. Волынцев приезжает в поместье и видит, что деревня захвачена.</p>";
+      } else if (sheet === "note") {
+        title.textContent = stage === "people" ? "Заметки о мире" : "Заметка";
+        body.innerHTML = "";
+        var area = document.createElement("textarea");
+        area.placeholder = "Замечание к переписи или текст, из которого собрать книгу";
+        body.appendChild(area);
+      } else {
+        title.textContent = "";
+        body.innerHTML = "";
+      }
+    }
+    document.getElementById("drawer-close").onclick = function () { sheet = ""; render(); };
+    document.getElementById("wide").onclick = function () {
+      document.body.classList.remove("phone");
+      this.classList.add("on");
+      document.getElementById("phone").classList.remove("on");
+    };
+    document.getElementById("phone").onclick = function () {
+      document.body.classList.add("phone");
+      this.classList.add("on");
+      document.getElementById("wide").classList.remove("on");
+    };
+    document.getElementById("unphone").onclick = function () {
+      document.body.classList.remove("phone");
+      document.getElementById("wide").classList.add("on");
+      document.getElementById("phone").classList.remove("on");
+    };
+    document.querySelectorAll(".themes button").forEach(function (button) {
+      button.onclick = function () {
+        document.body.classList.remove("sepia", "night");
+        if (button.dataset.theme === "sepia") document.body.classList.add("sepia");
+        if (button.dataset.theme === "night") document.body.classList.add("night");
+        document.querySelectorAll(".themes button").forEach(function (item) {
+          item.classList.toggle("on", item === button);
+        });
+      };
+    });
+    render();
+    var stepsEl = document.getElementById("steps");
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () {
+        var on = stepsEl.querySelector(".on");
+        if (on) on.scrollIntoView({ inline: "nearest", block: "nearest" });
+      }).observe(stepsEl);
+    }
+  </script>
+</body>
+</html>

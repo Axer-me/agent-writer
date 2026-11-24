@@ -16,7 +16,7 @@ _load_env()
 
 PROJECTS_DIR = ROOT / "projects"
 DEFAULT_OR_MODEL = "z-ai/glm-5.2:free"
-DEFAULT_GC_MODEL = "GigaChat-2-Max"
+DEFAULT_GC_MODEL = "GigaChat-3-Ultra"
 APP_PORT = 8765
 APP_HOST = "127.0.0.1"
 
@@ -48,6 +48,10 @@ def gigachat_scope() -> str:
 
 def gigachat_model() -> str:
     return _first_env("GIGACHAT_MODEL", default=DEFAULT_GC_MODEL)
+
+
+def gigachat_base_url() -> str:
+    return _first_env("GIGACHAT_BASE_URL")
 
 
 def gigachat_verify_ssl() -> bool:
